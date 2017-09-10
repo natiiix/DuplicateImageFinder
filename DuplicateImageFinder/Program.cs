@@ -10,8 +10,8 @@ namespace DuplicateImageFinder
 {
     public class Program
     {
-        private const int PRINT_LOADING_PROGRESS_EVERY_N = 10;
-        private const int PRINT_COMPARING_PROGRESS_EVERY_N = PRINT_LOADING_PROGRESS_EVERY_N * 1000;
+        //private const int PRINT_LOADING_PROGRESS_EVERY_N = 10;
+        private const int PRINT_COMPARING_PROGRESS_EVERY_N = 20000;
 
         // Lowest required similarity coefficient for two bitmaps to be considered similar
         private const double SIMILARITY_THRESHOLD = 0.9;
@@ -39,8 +39,9 @@ namespace DuplicateImageFinder
             // Compare the images
             Similarity[] similarities = CompareImages(images);
 
-            // Print the information about similar images
-            PrintSimilarityInfo(similarities, images, files);
+            // Print the information about similar images and
+            // let the user decide which of the images are supposed to be deleted
+            ResolveSimilarImages(similarities, images, files);
         }
 
         /// <summary>
@@ -101,6 +102,16 @@ namespace DuplicateImageFinder
         }
 
         /// <summary>
+        /// Retrieves the size of a file in bytes and returns it.
+        /// </summary>
+        /// <param name="filePath">Path of the file whose size is requested.</param>
+        /// <returns>Returns the size of the specified file in bytes.</returns>
+        private static long GetFileSize(string filePath)
+        {
+            return new FileInfo(filePath).Length;
+        }
+
+        /// <summary>
         /// Compares all the input images with each other and returns information about similar image pairs.
         /// </summary>
         /// <param name="images">An array of images to compare.</param>
@@ -146,46 +157,71 @@ namespace DuplicateImageFinder
 
         /// <summary>
         /// Prints information about discovered similar images.
+        /// Then prompts the user to choose whether they want to delete the duplicate image or not.
         /// </summary>
         /// <param name="similarities">Information about all the similar image pairs that were found.</param>
         /// <param name="images">Image data of all the images.</param>
-        /// <param name="files">File names of all the images.</param>
-        private static void PrintSimilarityInfo(Similarity[] similarities, ImageData[] images, string[] files)
+        /// <param name="imagePaths">File names of all the images.</param>
+        private static void ResolveSimilarImages(Similarity[] similarities, ImageData[] images, string[] imagePaths)
         {
+            // This needs to be called in order to get the modern looking buttons in our dialog.
+            // Without this call they will look like the default system buttons from Windows 95/98.
+            System.Windows.Forms.Application.EnableVisualStyles();
+
             // Print all the discovered similarities
             foreach (Similarity sim in similarities)
             {
-                // Determine which of the similar images has a higher resolution
-                int higherResIdx = ImageData.GetHigherResolutionIndex(images[sim.FirstIndex], images[sim.SecondIndex]);
-
-                // The images have the same resolution
-                if (higherResIdx == 0)
+                // Skip this similar image pair if either of the images doesn't exist anymore
+                if (!File.Exists(imagePaths[sim.FirstIndex]) || !File.Exists(imagePaths[sim.SecondIndex]))
                 {
-                    Console.WriteLine("Similar images (equal resolution): {0} | {1} ({2:0.##}% similarity)",
-                        files[sim.FirstIndex],
-                        files[sim.SecondIndex],
-                        sim.Coefficient * 100.0);
+                    continue;
                 }
-                else
+
+                // Get size of each of the images
+                long fileSizeFirst = GetFileSize(imagePaths[sim.FirstIndex]);
+                long fileSizeSecond = GetFileSize(imagePaths[sim.SecondIndex]);
+
+                // Determine which of the similar images has a higher resolution
+                int resFirst = images[sim.FirstIndex].GetFullResolution();
+                int resSecond = images[sim.SecondIndex].GetFullResolution();
+
+                // Indicates whether the first image is considered a duplicate or not
+                // Duplicate image is the one with a lower resolution
+                // In case both images have the same resolution, file size becomes the determining factor
+                // Higher file size indicates a potentially higher image quality
+                // If both properties are equal for both images, the first image is considered to be the original
+                bool firstIsDuplicate = (resSecond > resFirst || (resFirst == resSecond && fileSizeSecond > fileSizeFirst));
+
+                // Get the path of each of the image files
+                string pathOriginal = (firstIsDuplicate ? imagePaths[sim.SecondIndex] : imagePaths[sim.FirstIndex]);
+                string pathDuplicate = (firstIsDuplicate ? imagePaths[sim.FirstIndex] : imagePaths[sim.SecondIndex]);
+
+                // Print a message about the discovered duplicate image
+                PrintSimilarImageInfo(pathOriginal, pathDuplicate, sim.Coefficient);
+
+                // Get the file size of both images
+                long fileSizeOriginal = (firstIsDuplicate ? fileSizeSecond : fileSizeFirst);
+                long fileSizeDuplicate = (firstIsDuplicate ? fileSizeFirst : fileSizeSecond);
+
+                // Show a dialog asking the user whether the image marked as a duplicate should be deleted or not
+                //(new FormConfirmation(pathOriginal, fileSizeOriginal, pathDuplicate, fileSizeDuplicate, sim.Coefficient)).ShowDialog();
+
+                // If the form is not closed using one of the buttons, don't show the user any more information about similar images
+                if (new FormConfirmation(pathOriginal, fileSizeOriginal, pathDuplicate, fileSizeDuplicate, sim.Coefficient).ShowDialog() != System.Windows.Forms.DialogResult.OK)
                 {
-                    // Get index of the larger and the smaller image (to make printing the message easier)
-                    // First assume that the first image is larger
-                    int idxLarger = sim.FirstIndex;
-                    int idxSmaller = sim.SecondIndex;
-
-                    // The second image is larger
-                    if (higherResIdx == 2)
-                    {
-                        idxLarger = sim.SecondIndex;
-                        idxSmaller = sim.FirstIndex;
-                    }
-
-                    Console.WriteLine("Duplicate of {0}: {1} ({2:0.##}% similarity)",
-                        files[idxLarger],
-                        files[idxSmaller],
-                        sim.Coefficient * 100.0);
+                    break;
                 }
             }
+        }
+
+        private static void PrintSimilarImageInfo(string fileOriginal, string fileDuplicate, double similarity)
+        {
+            Console.WriteLine(Environment.NewLine +
+                "Duplicate image found!" + Environment.NewLine +
+                "Original: {0}" + Environment.NewLine +
+                "Duplicate: {1}" + Environment.NewLine +
+                "Similarity: {2:0.##}%",
+                fileOriginal, fileDuplicate, similarity * 100.0);
         }
 
         /// <summary>
@@ -206,9 +242,10 @@ namespace DuplicateImageFinder
         }
 
         /// <summary>
-        /// The main function.
+        /// The entry point of the program.
         /// </summary>
         /// <param name="args">Command line arguments.</param>
+        [STAThread]
         private static void Main(string[] args)
         {
             // There is supposed to be a single argument - path of the directory containing the images meant for comparison
@@ -367,40 +404,9 @@ namespace DuplicateImageFinder
             /// Calculates and returns the full resolution of the image in pixels.
             /// </summary>
             /// <returns>Returns the resolution of the original image in pixels.</returns>
-            private int GetFullResolution()
+            public int GetFullResolution()
             {
                 return FullWidth * FullHeight;
-            }
-
-            /// <summary>
-            /// Compares the resolution of two images and returns the index of the image with a higher resolution.
-            /// 0 => The images have equal resolution.
-            /// 1 => The first image has a higher resolution.
-            /// 2 => The second image has a higher resolution.
-            /// </summary>
-            /// <param name="imgData1">First image.</param>
-            /// <param name="imgData2">Second image.</param>
-            /// <returns>Index of the image with a higher resolution.</returns>
-            public static int GetHigherResolutionIndex(ImageData imgData1, ImageData imgData2)
-            {
-                int res1 = imgData1.GetFullResolution();
-                int res2 = imgData2.GetFullResolution();
-
-                // The first image has a higher resolution
-                if (res1 > res2)
-                {
-                    return 1;
-                }
-                // The second image has a higher resolution
-                else if (res2 > res1)
-                {
-                    return 2;
-                }
-                // Both images have the same resolution
-                else
-                {
-                    return 0;
-                }
             }
         }
 
