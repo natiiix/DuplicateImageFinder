@@ -1,8 +1,8 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Drawing;
 using System.Drawing.Imaging;
+using System.IO;
 using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 
@@ -16,6 +16,73 @@ namespace DuplicateImageFinder
         // Lowest required similarity coefficient for two bitmaps to be considered similar
         private const double SIMILARITY_THRESHOLD = 0.9;
 
+        // Suffix that is added to the name of the directory in which the scaled images are stored
+        private const string SCALED_DIR_SUFFIX = "_scaled";
+
+        // Extension used for serialized image data objects
+        private const string SCALED_BINARY_EXTENSION = "dat";
+
+        /// <summary>
+        /// Converts the source path to a path for scaled images.
+        /// </summary>
+        /// <param name="sourcePath">Source path.</param>
+        /// <returns>Returns full path of the directory for scaled images.</returns>
+        private static string PathSourceToScaled(string sourcePath)
+        {
+            // Convert the source path to full path
+            string fullSourcePath = Path.GetFullPath(sourcePath);
+
+            // Determine whether the path points to a file or a directory
+            bool isFile = false;
+
+            // If the path points to a file
+            if (File.Exists(fullSourcePath))
+            {
+                isFile = true;
+            }
+            // If the path points to a directory
+            else if (Directory.Exists(fullSourcePath))
+            {
+                isFile = false;
+            }
+            // Invalid path
+            else
+            {
+                throw new ArgumentException("Invalid path.");
+            }
+
+            // Split the path into individual parts
+            string[] parts = sourcePath.Split(
+                new char[] { Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar },
+                StringSplitOptions.RemoveEmptyEntries);
+
+            // There must be at least two parts in a proper full path
+            if (parts.Length < 2)
+            {
+                throw new ArgumentException("Invalid path.");
+            }
+
+            // Add a suffix to the name of the last directory in the path
+            parts[parts.Length - (isFile ? 2 : 1)] += SCALED_DIR_SUFFIX;
+
+            // Scaled versions of files must have a different extension because they are binary
+            if (isFile)
+            {
+                // Get the index of the file name part of the path
+                int fileNameIdx = parts.Length - 1;
+
+                // Replace the extensions of the source file with the binary extension
+                parts[fileNameIdx] = string.Join(".", parts[fileNameIdx].Split('.')[0], SCALED_BINARY_EXTENSION);
+            }
+
+            // Join all the parts of the path back together and return it
+            return string.Join(Path.DirectorySeparatorChar.ToString(), parts);
+        }
+
+        /// <summary>
+        /// Finds duplicate images in a specified directory.
+        /// </summary>
+        /// <param name="imageDir">Path of the directory to be checked for duplicate images.</param>
         private static void FindDuplicates(string imageDir)
         {
             // Make sure the source directory exists
@@ -24,6 +91,12 @@ namespace DuplicateImageFinder
                 Console.WriteLine("Invalid source directory path!");
                 return;
             }
+
+            // Get path of the directory for scaled images
+            string pathScaled = PathSourceToScaled(imageDir);
+
+            // Create the directory for scaled images if it doesn't already exist
+            Directory.CreateDirectory(pathScaled);
 
             // Get a list of files in the source directory
             string[] files = Directory.GetFiles(imageDir);
@@ -81,7 +154,7 @@ namespace DuplicateImageFinder
                 scalingTasks[i] = Task.Run(() =>
                 {
                     // Get the image data from a file
-                    return new ImageData(imagePaths[pathIndex]);
+                    return GetImageData(imagePaths[pathIndex]);
                 });
             }
 
@@ -99,6 +172,44 @@ namespace DuplicateImageFinder
             Console.WriteLine("Loading: Done!");
 
             return images;
+        }
+
+        /// <summary>
+        /// Finds or generates image data object from an image at specified path.
+        /// Image data objects are serialized into a special folder to make future use of them faster.
+        /// </summary>
+        /// <param name="imagePath">Path of the image for which the image data are requested.</param>
+        /// <returns>Returns image data of an image with the specified path.</returns>
+        private static ImageData GetImageData(string imagePath)
+        {
+            // Get the path to the image data serialization file for this image
+            string scaledPath = PathSourceToScaled(imagePath);
+
+            ImageData imgData = null;
+
+            // If this image file already has a serialized image data object
+            if (File.Exists(scaledPath))
+            {
+                // Deserialize the image data object from its serialization file
+                using (Stream s = new FileStream(scaledPath, FileMode.Open, FileAccess.Read))
+                {
+                    imgData = (ImageData)new System.Runtime.Serialization.Formatters.Binary.BinaryFormatter().Deserialize(s);
+                }
+            }
+            // If image data for this image file haven't been serialized yet
+            else
+            {
+                imgData = new ImageData(imagePath);
+
+                // Serialize the image data object to its serialization file
+                using (Stream s = new FileStream(scaledPath, FileMode.Create, FileAccess.Write))
+                {
+                    new System.Runtime.Serialization.Formatters.Binary.BinaryFormatter().Serialize(s, imgData);
+                }
+            }
+
+            // Return the image data object
+            return imgData;
         }
 
         /// <summary>
@@ -214,6 +325,12 @@ namespace DuplicateImageFinder
             }
         }
 
+        /// <summary>
+        /// Prints information about a discovered similarity between two images.
+        /// </summary>
+        /// <param name="fileOriginal">Path of the original image file.</param>
+        /// <param name="fileDuplicate">Path of the duplicate image file.</param>
+        /// <param name="similarity">Similarity coefficient of these two images.</param>
         private static void PrintSimilarImageInfo(string fileOriginal, string fileDuplicate, double similarity)
         {
             Console.WriteLine(Environment.NewLine +
@@ -248,20 +365,33 @@ namespace DuplicateImageFinder
         [STAThread]
         private static void Main(string[] args)
         {
-            // There is supposed to be a single argument - path of the directory containing the images meant for comparison
+            // Source directory has been provided as a command line argument
             if (args.Length == 1)
             {
+                // Use the argument as a path of the image directory
                 FindDuplicates(args[0]);
+            }
+            // No arguments were provided
+            else if (args.Length == 0)
+            {
+                // Ask the user to enter the path to the directory that contains the images to be checked
+                Console.Write("Image source directory: ");
+                FindDuplicates(Console.ReadLine());
             }
             else
             {
                 Console.WriteLine("Invalid arguments! Expected source directory path.");
             }
+
+            // Wait for input before exitting
+            Console.Write("Press ENTER to exit...");
+            Console.ReadLine();
         }
 
         /// <summary>
         /// Class for storing all the important information about an image.
         /// </summary>
+        [Serializable]
         private class ImageData
         {
             // Size of the longest dimension of the scaled bitmap
@@ -389,8 +519,19 @@ namespace DuplicateImageFinder
                 // Calculate the difference between the raw image bytes
                 int difference = 0;
 
+                // Calculate the stride and how much of it is filled with valid values
+                int stride = RawBytes.Length / ScaledHeight;
+                int validStride = ScaledWidth * 3;
+
                 for (int i = 0; i < RawBytes.Length; i++)
                 {
+                    // Skip invalid bytes (those that are outside the image boundaries)
+                    if (i % stride >= validStride)
+                    {
+                        continue;
+                    }
+
+                    // Add the difference of this byte to the total difference
                     difference += Math.Abs(imgData.RawBytes[i] - RawBytes[i]);
                 }
 
