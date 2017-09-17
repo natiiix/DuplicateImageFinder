@@ -80,16 +80,20 @@ namespace DuplicateImageFinder
         }
 
         /// <summary>
-        /// Finds duplicate images in a specified directory.
+        /// Gets image data objects of all images in a specified directory.
         /// </summary>
-        /// <param name="imageDir">Path of the directory to be checked for duplicate images.</param>
-        private static void FindDuplicates(string imageDir)
+        /// <param name="imageDir">Path of directory to load the image from.</param>
+        /// <param name="imagePaths">Output array for returning paths of all the images.</param>
+        /// <returns>Returns an array of image data.</returns>
+        private static ImageData[] GetImageDataFromDirectory(string imageDir, out string[] imagePaths)
         {
             // Make sure the source directory exists
             if (!Directory.Exists(imageDir))
             {
                 Console.WriteLine("Invalid source directory path!");
-                return;
+
+                imagePaths = new string[0];
+                return new ImageData[0];
             }
 
             // Get path of the directory for scaled images
@@ -99,22 +103,79 @@ namespace DuplicateImageFinder
             Directory.CreateDirectory(pathScaled);
 
             // Get a list of files in the source directory
-            string[] files = Directory.GetFiles(imageDir);
+            imagePaths = Directory.GetFiles(imageDir);
 
-            if (files.Length < 2)
+            // Load and sacle all the images and return their image data
+            return LoadScaledImages(imagePaths);
+        }
+
+        /// <summary>
+        /// Finds duplicate images in a specified directory.
+        /// </summary>
+        /// <param name="imageDir">Path of the directory to be checked for duplicate images.</param>
+        private static void FindDuplicatesWithinDirectory(string imageDir)
+        {
+            // Get the image data of images in the source directory
+            ImageData[] images = GetImageDataFromDirectory(imageDir, out string[] imagePaths);
+
+            // There must be at least two images for any comparison to be possible
+            if (images.Length < 2)
             {
                 Console.WriteLine("Insufficient amount of source images!");
+                return;
             }
 
-            // Load the images
-            ImageData[] images = LoadScaledImages(files);
-
             // Compare the images
-            Similarity[] similarities = CompareImages(images);
+            Similarity[] similarities = CompareImagesWithEachOther(images);
 
             // Print the information about similar images and
             // let the user decide which of the images are supposed to be deleted
-            ResolveSimilarImages(similarities, images, files);
+            ResolveSimilarImages(similarities, images, imagePaths);
+        }
+
+        /// <summary>
+        /// Finds images similar to a single image in a directory with images.
+        /// </summary>
+        /// <param name="imageDir">Path of directory with images to compare against.</param>
+        /// <param name="singleImagePath">Path of single image to compare with images from the directory.</param>
+        private static void FindDuplicatesOfSingleFile(string imageDir, string singleImagePath)
+        {
+            // Make sure the single image file exists
+            if (!File.Exists(singleImagePath))
+            {
+                Console.WriteLine("The specified single image file does not exist!");
+                return;
+            }
+
+            // Load the images from the source directory
+            ImageData[] images = GetImageDataFromDirectory(imageDir, out string[] imagePaths);
+
+            if (images.Length < 1)
+            {
+                Console.WriteLine("Nothing to compare against! At least one image file is required in the source directory.");
+                return;
+            }
+
+            // Get image data of the single image
+            // Its image data are not supposed to be serialized to avoid creating pointless directories / files
+            ImageData singleImage = new ImageData(singleImagePath);
+
+            // Compare the images
+            Similarity[] similarities = CompareImagesWithSingleImage(images, singleImage);
+
+            // Append the image data of the single image to the array of image data from the source directory
+            List<ImageData> listImageData = new List<ImageData>();
+            listImageData.AddRange(images);
+            listImageData.Add(singleImage);
+
+            // Add the path of the single image to the paths of the image from the source directory
+            List<string> listImagePaths = new List<string>();
+            listImagePaths.AddRange(imagePaths);
+            listImagePaths.Add(singleImagePath);
+
+            // Print the information about similar images and
+            // let the user decide which of the images are supposed to be deleted
+            ResolveSimilarImages(similarities, listImageData.ToArray(), listImagePaths.ToArray());
         }
 
         /// <summary>
@@ -227,7 +288,7 @@ namespace DuplicateImageFinder
         /// </summary>
         /// <param name="images">An array of images to compare.</param>
         /// <returns>Returns an array of all the similarities found in the input image array.</returns>
-        private static Similarity[] CompareImages(ImageData[] images)
+        private static Similarity[] CompareImagesWithEachOther(ImageData[] images)
         {
             // Create a list to hold all the information regarding similar images
             List<Similarity> similarImages = new List<Similarity>();
@@ -257,6 +318,49 @@ namespace DuplicateImageFinder
                         // Print the progress every N checked combinations
                         Console.WriteLine("Comparing: {0:0.##}% ({1} / {2})", ((double)combinationsChecked / combinationsAvailable * 100.0), combinationsChecked, combinationsAvailable);
                     }
+                }
+            }
+
+            Console.WriteLine("Comparing: Done!");
+
+            // Return the list of similar image pairs as an array
+            return similarImages.ToArray();
+        }
+
+        /// <summary>
+        /// Compares a single image with each image in an array of image data.
+        /// </summary>
+        /// <param name="images">Array of images to compare the single image with.</param>
+        /// <param name="singleImage">Image data of the single image.</param>
+        /// <returns>Returns discovered similarities between the single image and the array of images.</returns>
+        private static Similarity[] CompareImagesWithSingleImage(ImageData[] images, ImageData singleImage)
+        {
+            // Create a list to hold all the information regarding similar images
+            List<Similarity> similarImages = new List<Similarity>();
+
+            // Compare the single image to every image in the array of image data
+            for (int i = 0; i < images.Length; i++)
+            {
+                // Get the similarity coefficient between the two images
+                double similarity = singleImage.Compare(images[i]);
+
+                // These two images are similar
+                if (similarity >= SIMILARITY_THRESHOLD)
+                {
+                    // Append information about the discovered similarity to the list of similar images
+                    // The single image is represented by the second image in the similarity because in case of an exact
+                    // similarity, the second image will be marked as a duplicate and can be deleted
+                    // It has an index 1 higher than the currently highest index because it will be appended to it later
+                    similarImages.Add(new Similarity(i, images.Length, similarity));
+                }
+
+                // This needs to be done because indexes start at 0
+                int progress = i + 1;
+
+                // Print the progress every N iterations
+                if (progress % PRINT_COMPARING_PROGRESS_EVERY_N == 0)
+                {
+                    Console.WriteLine("Comparing: {0:0.##}% ({1} / {2})", ((double)progress / images.Length * 100.0), progress, images.Length);
                 }
             }
 
@@ -365,22 +469,51 @@ namespace DuplicateImageFinder
         [STAThread]
         private static void Main(string[] args)
         {
+            string imageDir = string.Empty;
+            string singleImagePath = string.Empty;
+
             // Source directory has been provided as a command line argument
-            if (args.Length == 1)
+            if (args.Length == 1 || args.Length == 2)
             {
-                // Use the argument as a path of the image directory
-                FindDuplicates(args[0]);
+                // Use the first argument as a path of the image directory
+                imageDir = args[0];
+
+                // Arguments also contain the path of the single image file
+                if (args.Length == 2)
+                {
+                    // Copy the path of the file
+                    singleImagePath = args[1];
+                }
             }
             // No arguments were provided
             else if (args.Length == 0)
             {
                 // Ask the user to enter the path to the directory that contains the images to be checked
-                Console.Write("Image source directory: ");
-                FindDuplicates(Console.ReadLine());
+                Console.Write("Enter path to image source directory: ");
+                imageDir = Console.ReadLine();
+
+                // Ask the user to provide the optional single image file path
+                Console.Write("Enter path to single image file (leave empty to compare images within the directory): ");
+                singleImagePath = Console.ReadLine();
             }
+            // More than two command line arguments
             else
             {
-                Console.WriteLine("Invalid arguments! Expected source directory path.");
+                Console.WriteLine("Invalid arguments!" + Environment.NewLine +
+                    "Syntax: DuplicateImageFinder [path to image directory [path to single image file]]");
+            }
+
+            // Path to a single image file hasn't been provided
+            // Find duplicates within the image directory
+            if (singleImagePath.Length == 0)
+            {
+                FindDuplicatesWithinDirectory(imageDir);
+            }
+            // Path to a single image file has been provided
+            // Find duplicates of that image file in the image directory
+            else
+            {
+                FindDuplicatesOfSingleFile(imageDir, singleImagePath);
             }
 
             // Wait for input before exitting
