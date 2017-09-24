@@ -22,6 +22,9 @@ namespace DuplicateImageFinder
         // Extension used for serialized image data objects
         private const string SCALED_BINARY_EXTENSION = "dat";
 
+        // An array of file extensions that will be considered as images
+        private static readonly string[] IMAGE_FILE_EXTENSIONS = { "bmp", "png", "jpg", "jpeg", "gif", "tiff" };
+
         /// <summary>
         /// Converts the source path to a path for scaled images.
         /// </summary>
@@ -102,11 +105,42 @@ namespace DuplicateImageFinder
             // Create the directory for scaled images if it doesn't already exist
             Directory.CreateDirectory(pathScaled);
 
-            // Get a list of files in the source directory
-            imagePaths = Directory.GetFiles(imageDir);
+            // Get a list of files in the source directory and filter out all the non-image files
+            imagePaths = FilterImageFiles(Directory.GetFiles(imageDir));
 
             // Load and sacle all the images and return their image data
             return LoadScaledImages(imagePaths);
+        }
+
+        /// <summary>
+        /// Takes an array of strings containing all the files in a directory and filters out
+        /// files that are not images (text files, etc.).
+        /// </summary>
+        /// <param name="allFiles">Array of all the file names.</param>
+        /// <returns>Returns an array of file names that represent images.</returns>
+        private static string[] FilterImageFiles(string[] allFiles)
+        {
+            // Create a list to store the file names of image files
+            List<string> imageFiles = new List<string>();
+
+            // Iterate through all the files
+            foreach (string fileName in allFiles)
+            {
+                // For each of the files iterate through all the recognized image file extensions
+                foreach (string ext in IMAGE_FILE_EXTENSIONS)
+                {
+                    // If the file name has an image file extension
+                    if (fileName.EndsWith("." + ext))
+                    {
+                        // Add the file name to the list of image files and break out of the extension-checking foreach
+                        imageFiles.Add(fileName);
+                        break;
+                    }
+                }
+            }
+
+            // Return the list of image files as an array
+            return imageFiles.ToArray();
         }
 
         /// <summary>
