@@ -17,8 +17,11 @@ namespace DuplicateImageFinder
         // Both images share the same value
         private static readonly Color COLOR_EQUAL = Color.LightSlateGray;
 
-        // Path of the file that is deleted if the user chooses so
-        private string deletePath = string.Empty;
+        // Path of the file marked as an original
+        private readonly string PATH_ORIGINAL;
+
+        // Path of the file marked as a duplicate
+        private readonly string PATH_DUPLICATE;
 
         /// <summary>
         /// Initializes the form with the two provided images and displays their similarity coefficient.
@@ -97,25 +100,37 @@ namespace DuplicateImageFinder
             // Display the similarity coefficient
             labelSimilarity.Text = string.Format("Similarity: {0:0.##%}", similarity);
 
-            // Set the delete path in case the user will want to delete the duplicate image
-            deletePath = pathDuplicate;
+            // Copy the file paths
+            PATH_ORIGINAL = pathOriginal;
+            PATH_DUPLICATE = pathDuplicate;
         }
 
         private void ButtonKeep_Click(object sender, EventArgs e)
         {
-            // Keeps the duplicate image, only closes the window
+            // Keeps both images, only closes the window
             DisposeAndClose(true);
         }
 
-        private void ButtonDelete_Click(object sender, EventArgs e)
+        private void ButtonDeleteDuplicate_Click(object sender, EventArgs e)
         {
             // Deletes the duplicate image and closes the window
             // The duplicate image must be first disposed before being deleted
             // to avoid the "file is used by another process" error
             pictureBoxDuplicate.Image.Dispose();
-            File.Delete(deletePath);
+            File.Delete(PATH_DUPLICATE);
 
-            DisposeAndClose(false);
+            DisposeAndClose(true, false);
+        }
+
+        private void ButtonDeleteOriginal_Click(object sender, EventArgs e)
+        {
+            // Deletes the original image and closes the window
+            // The original image must be first disposed before being deleted
+            // to avoid the "file is used by another process" error
+            pictureBoxOriginal.Image.Dispose();
+            File.Delete(PATH_ORIGINAL);
+
+            DisposeAndClose(false, true);
         }
 
         private void PictureBoxOriginal_Click(object sender, EventArgs e)
@@ -134,12 +149,17 @@ namespace DuplicateImageFinder
         /// Disposes both images and closes the form.
         /// </summary>
         /// <param name="disposeDuplicate">Set this to false if the duplicate image has already been disposed.</param>
-        private void DisposeAndClose(bool disposeDuplicate = true)
+        private void DisposeAndClose(bool disposeOriginal = true, bool disposeDuplicate = true)
         {
-            // Dispose the original image
-            pictureBoxOriginal.Image.Dispose();
+            // Images are disposed unless specified otherwise
 
-            // Only dispose the duplicate image if it hasn't been disposed before
+            // Dispose the original image
+            if (disposeOriginal)
+            {
+                pictureBoxOriginal.Image.Dispose();
+            }
+
+            // Dispose the duplicate image
             if (disposeDuplicate)
             {
                 pictureBoxDuplicate.Image.Dispose();

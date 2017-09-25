@@ -14,7 +14,7 @@ namespace DuplicateImageFinder
         private const int PRINT_COMPARING_PROGRESS_EVERY_N = 20000;
 
         // Lowest required similarity coefficient for two bitmaps to be considered similar
-        private const double SIMILARITY_THRESHOLD = 0.9;
+        private const double SIMILARITY_THRESHOLD = 0.99;
 
         // Suffix that is added to the name of the directory in which the scaled images are stored
         private const string SCALED_DIR_SUFFIX = "_scaled";
